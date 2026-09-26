@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Badges Admin</title>
+<style>
+    :root {
+        --bg-0: #0b0e14;
+        --bg-1: #141924;
+        --bg-2: #1b2130;
+        --border: rgba(150,175,215,0.15);
+        --accent: #6683ab;
+        --accent-glow: rgba(102,131,171,0.25);
+        --text-0: rgba(255,255,255,0.92);
+        --text-1: rgba(255,255,255,0.55);
+        --danger: #d9534f;
+        --success: #4caf6c;
+    }
+    * { box-sizing: border-box; }
+    body {
+        margin: 0; min-height: 100vh; padding: 32px 20px;
+        background: var(--bg-0); color: var(--text-0);
+        font-family: 'Segoe UI', system-ui, sans-serif;
+    }
+    h1 { font-size: 20px; margin: 0 0 4px; }
+    .subtitle { color: var(--text-1); font-size: 13px; margin-bottom: 24px; }
+    .card {
+        background: var(--bg-1); border: 1px solid var(--border);
+        border-radius: 10px; padding: 20px; max-width: 720px; margin: 0 auto 20px;
+    }
+    label { display: block; font-size: 12px; color: var(--text-1); margin-bottom: 6px; }
+    input {
+        width: 100%; padding: 9px 11px; border-radius: 6px;
+        border: 1px solid var(--border); background: var(--bg-2);
+        color: var(--text-0); font-size: 13px; margin-bottom: 12px;
+    }
+    input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+    button {
+        padding: 9px 16px; border-radius: 6px; border: 1px solid var(--border);
+        background: var(--bg-2); color: var(--text-0); font-size: 13px;
+        cursor: pointer; transition: all .15s;
+    }
+    button:hover { border-color: var(--accent); color: var(--accent); }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    button.primary:hover { opacity: .9; color: #fff; }
+    button.danger-btn { color: var(--danger); border-color: rgba(217,83,79,0.4); }
+    button.danger-btn:hover { background: rgba(217,83,79,0.1); border-color: var(--danger); }
+    .row { display: flex; gap: 10px; }
+    .row > * { flex: 1; }
+    #status {
+        max-width: 720px; margin: 0 auto 16px; padding: 10px 14px;
+        border-radius: 8px; font-size: 13px; display: none;
+    }
+    #status.error { display: block; background: rgba(217,83,79,0.12); color: var(--danger); border: 1px solid rgba(217,83,79,0.3); }
+    #status.ok { display: block; background: rgba(76,175,108,0.12); color: var(--success); border: 1px solid rgba(76,175,108,0.3); }
+    .user-card { margin-bottom: 14px; }
+    .user-card h3 { font-size: 14px; margin: 0 0 10px; color: var(--accent); word-break: break-all; }
+    .badge-row {
+        display: flex; align-items: center; gap: 10px;
+        padding: 8px 0; border-top: 1px solid var(--border);
+    }
+    .badge-row img { width: 28px; height: 28px; border-radius: 6px; object-fit: cover; background: var(--bg-2); }
+    .badge-name { flex: 1; font-size: 13px; }
+    .badge-row code { font-size: 11px; color: var(--text-1); }
+    .empty { color: var(--text-1); font-size: 13px; text-align: center; padding: 20px; }
+</style>
+</head>
+<body>
+    <div class="card">
+        <h1>Badges Admin</h1>
+        <div class="subtitle">Manage custom badges served at /api/v1/badges</div>
+        <label for="key-input">Admin Key</label>
+        <div class="row">
+            <input type="password" id="key-input" placeholder="BADGES_ADMIN_KEY">
+            <button class="primary" id="save-key-btn" style="flex:0 0 auto;">Save &amp; Load</button>
+        </div>
+    </div>
+
+    <div id="status"></div>
+
+    <div class="card">
+        <h1 style="font-size:15px;">Add Badge</h1>
+        <form id="add-form">
+            <label for="f-userid">Discord User ID</label>
+            <input type="text" id="f-userid" placeholder="e.g. 123456789012345678" required>
+            <label for="f-icon">Icon URL</label>
+            <input type="text" id="f-icon" placeholder="https://example.com/badge.png" required>
+            <label for="f-name">Name (optional)</label>
+            <input type="text" id="f-name" placeholder="Supporter">
+            <button type="submit" class="primary">Add Badge</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h1 style="font-size:15px;">Granted Badges</h1>
+        <div id="users"><p class="empty">Enter your admin key above to load badges.</p></div>
+    </div>
+
+<script>
+const KEY_STORAGE = 'badges_admin_key';
+const getKey = () => localStorage.getItem(KEY_STORAGE) || '';
+const setKey = (k) => localStorage.setItem(KEY_STORAGE, k);
+
+function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function setStatus(msg, isError) {
+    const el = document.getElementById('status');
+    if (!msg) { el.className = ''; el.textContent = ''; return; }
+    el.className = isError ? 'error' : 'ok';
+    el.textContent = msg;
+}
+
+async function authFetch(url, opts) {
+    opts = opts || {};
+    opts.headers = Object.assign({}, opts.headers, { Authorization: 'Bearer ' + getKey() });
+    return fetch(url, opts);
+}
+
+async function loadAll() {
+    if (!getKey()) return;
+    try {
+        const res = await authFetch('/api/v1/badges');
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) {
+            setStatus(data.error || ('Error ' + res.status + ' - check your admin key'), true);
+            return;
+        }
+        renderUsers(data.users || {});
+        setStatus('');
+    } catch (e) {
+        setStatus('Network error: ' + e.message, true);
+    }
+}
+
+function renderUsers(users) {
+    const container = document.getElementById('users');
+    const ids = Object.keys(users);
+    if (ids.length === 0) {
+        container.innerHTML = '<p class="empty">No badges granted yet.</p>';
+        return;
+    }
+    container.innerHTML = '';
+    for (const userId of ids) {
+        const badges = users[userId];
+        if (!badges.length) continue;
+        const card = document.createElement('div');
+        card.className = 'user-card';
+        const title = document.createElement('h3');
+        title.textContent = userId;
+        card.appendChild(title);
+        for (const b of badges) {
+            const row = document.createElement('div');
+            row.className = 'badge-row';
+            const img = document.createElement('img');
+            img.src = b.icon || '';
+            img.onerror = () => { img.style.opacity = 0.2; };
+            const name = document.createElement('span');
+            name.className = 'badge-name';
+            name.textContent = b.name || '(no name)';
+            const idTag = document.createElement('code');
+            idTag.textContent = b.id;
+            const delBtn = document.createElement('button');
+            delBtn.className = 'danger-btn';
+            delBtn.textContent = 'Delete';
+            delBtn.addEventListener('click', () => deleteBadge(userId, b.id));
+            row.appendChild(img);
+            row.appendChild(name);
+            row.appendChild(idTag);
+            row.appendChild(delBtn);
+            card.appendChild(row);
+        }
+        container.appendChild(card);
+    }
+}
+
+async function deleteBadge(userId, badgeId) {
+    if (!confirm('Delete this badge?')) return;
+    try {
+        const res = await authFetch('/api/v1/badges/' + encodeURIComponent(userId) + '/' + encodeURIComponent(badgeId), { method: 'DELETE' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) {
+            setStatus(data.error || ('Error ' + res.status), true);
+            return;
+        }
+        setStatus('Badge deleted.');
+        loadAll();
+    } catch (e) {
+        setStatus('Network error: ' + e.message, true);
+    }
+}
+
+document.getElementById('save-key-btn').addEventListener('click', () => {
+    const val = document.getElementById('key-input').value.trim();
+    if (!val) return;
+    setKey(val);
+    loadAll();
+});
+
+document.getElementById('add-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const userId = document.getElementById('f-userid').value.trim();
+    const icon = document.getElementById('f-icon').value.trim();
+    const name = document.getElementById('f-name').value.trim();
+    if (!userId || !icon) { setStatus('User ID and Icon URL are required', true); return; }
+    try {
+        const res = await authFetch('/api/v1/badges/' + encodeURIComponent(userId), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ icon, name })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) {
+            setStatus(data.error || ('Error ' + res.status), true);
+            return;
+        }
+        document.getElementById('f-userid').value = '';
+        document.getElementById('f-icon').value = '';
+        document.getElementById('f-name').value = '';
+        setStatus('Badge added.');
+        loadAll();
+    } catch (e) {
+        setStatus('Network error: ' + e.message, true);
+    }
+});
+
+(function init() {
+    const key = getKey();
+    if (key) {
+        document.getElementById('key-input').value = key;
+        loadAll();
+    }
+})();
+</script>
+</body>
+</html>
